@@ -1,0 +1,1 @@
+10702  78451 439742 artifacts/wc/inputBig.txt

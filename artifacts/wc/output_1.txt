@@ -1,0 +1,1 @@
+40  37 121 artifacts/wc/input_1.txt

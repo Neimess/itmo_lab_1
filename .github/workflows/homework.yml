@@ -1,0 +1,49 @@
+name: Homework
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  linter:
+    name: Linter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/common-steps
+      - name: Run Linter
+        run: uv run ruff check . --no-cache
+
+  mypy:
+    name: MyPy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/common-steps
+      - name: Type Checker [Optional]
+        run: uv run mypy src
+
+  tests:
+    name: Pytest
+    needs: [linter]
+    runs-on: ubuntu-latest
+    # strategy:
+    #   matrix:
+    #     python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - uses: ./.github/actions/common-steps
+      - name: Set up Python (matrix override)
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+      - name: Run tests
+        run: uv run pytest tests -s -vv --color=yes
