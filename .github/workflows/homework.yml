@@ -22,7 +22,7 @@ jobs:
         run: uv run ruff check . --no-cache
 
   mypy:
-    name: MyPy
+    name: MyPy [Optional]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
