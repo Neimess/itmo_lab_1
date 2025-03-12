@@ -1,11 +1,10 @@
 import sys
 
-from nl import NL
+from src.nl.nl import NL
 
 
 def main() -> None:
     nl_instance = NL()
-
     if len(sys.argv) > 1:
         for filename in sys.argv[1:]:
             nl_instance.process_file(filename)

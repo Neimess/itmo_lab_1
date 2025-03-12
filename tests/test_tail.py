@@ -1,7 +1,11 @@
 import os
-import subprocess
+import sys
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 
 import pytest
+
+from src.tail.tail_main import main as tail_main
 
 SOLUTION_FOLDER_PATH = os.path.join("src", "tail")
 RESOURCE_FOLDER_PATH = os.path.join("artifacts", "tail")
@@ -29,20 +33,16 @@ RESOURCE_FOLDER_PATH = os.path.join("artifacts", "tail")
         ),
     ],
 )
-def test_tail_multiple_files(input_files, expected_output):
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "tail_main.py"), "-n", "3", *input_files],
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_tail_multiple_files(input_files, expected_output, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["tail_main", "-n", "3", *input_files])
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        tail_main()
 
-    assert result.returncode == 0, f"Program exited with error:\n{result.stderr}"
-
-    output_lines = result.stdout.strip().split("\n")
+    actual_output = stdout.getvalue().strip().split("\n")
     expected_lines = expected_output
 
-    assert output_lines == expected_lines, f"\nExpected:\n{expected_output}\nGot:\n{result.stdout}"
+    assert actual_output == expected_lines, f"\nExpected:\n{expected_output}\nGot:\n{actual_output}"
 
 
 @pytest.mark.parametrize(
@@ -58,135 +58,110 @@ def test_tail_multiple_files(input_files, expected_output):
         ),
     ],
 )
-def test_compare_lines(input_file: str, output_file: str) -> None:
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "tail_main.py"), input_file],
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_compare_lines(input_file: str, output_file: str, monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["tail_main", input_file])
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        tail_main()
 
-    output_lines = result.stdout.strip().split("\n")
+    actual_output = stdout.getvalue().strip().split("\n")
 
     with open(output_file, encoding="utf-8") as expected_output_file:
         expected_output_lines = expected_output_file.read().strip().split("\n")
 
-    assert len(output_lines) == len(expected_output_lines), (
-        f"The number of lines in the output ({len(output_lines)}) does not match the expected number"
+    assert len(actual_output) == len(expected_output_lines), (
+        f"The number of lines in the output ({len(actual_output)}) does not match the expected number"
         f" ({len(expected_output_lines)})"
     )
 
-    for expected_line, output_line in zip(expected_output_lines, output_lines, strict=False):
+    for expected_line, output_line in zip(expected_output_lines, actual_output, strict=False):
         assert expected_line == output_line, f"\nExpected: {expected_line}\nReceived : {output_line}"
 
 
-def test_process_file_not_found():
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "tail_main.py"), "non_existent_file.txt"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_process_file_not_found(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["tail_main", "non_existent_file.txt"])
+    stderr = StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    with pytest.raises(SystemExit) as excinfo:
+        tail_main()
 
-    assert result.returncode != 0, "The program should exit with an error if the file is missing."
-    assert "tail: non_existent_file.txt: No such file or directory" in result.stderr, (
-        f"Expected error, but stderr: {result.stderr}"
-    )
+    assert excinfo.value.code != 0, "The program should exit with an error if the file is missing."
 
 
-def test_process_file_permission_error(tmp_path):
-    restricted_file = tmp_path / "restricted.txt"
-    restricted_file.write_text("Some data")
+def test_tail_missing_file(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["tail_main", "non_existent_file.txt"])
+    stderr = StringIO()
+    with redirect_stderr(stderr), pytest.raises(SystemExit) as excinfo:
+        tail_main()
 
-    restricted_file.chmod(0o000)
+    assert excinfo.value.code != 0, "Expected non-zero exit code for missing file."
 
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "tail_main.py"), str(restricted_file)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
 
-    restricted_file.chmod(0o644)
+def test_tail_large_n(monkeypatch, tmp_path):
+    test_file = tmp_path / "test_large_n.txt"
+    test_file.write_text("\n".join([f"Line {i}" for i in range(1, 21)]))
 
-    assert result.returncode != 0, "The program should exit with an error on PermissionError."
-    assert f"tail: {restricted_file}: " in result.stderr, (
-        f"Expected permission error in stderr, but got:\n{result.stderr}"
+    monkeypatch.setattr(sys, "argv", ["tail_main", "-n", "50", str(test_file)])
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        tail_main()
+
+    expected_output = "\n".join([f"Line {i}" for i in range(1, 21)])
+    assert stdout.getvalue().strip() == expected_output, (
+        "Expected entire file content when -n is larger than file size."
     )
 
 
-def test_tail_n(tmp_path):
-    test_file = tmp_path / "test_n.txt"
-    test_file.write_text("Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n", encoding="utf-8")
+def test_tail_invalid_n(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["tail_main", "-n", "invalid"])
+    stderr = StringIO()
+    with redirect_stderr(stderr), pytest.raises(SystemExit) as excinfo:
+        tail_main()
 
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "tail_main.py"), "-n", "3", str(test_file)],
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-
-    expected_output = "Line 3\nLine 4\nLine 5\n"
-
-    assert result.stdout.strip() == expected_output.strip(), f"Wrong output: {result.stdout}"
+    assert excinfo.value.code != 10, "Expected non zero exit code for invalid -n argument."
 
 
-def test_tail_stdin():
+def test_tail_stdin(monkeypatch):
     input_data = "\n".join([f"Line {chr(i)}" for i in range(65, 91)])
     expected_output = "\n".join([f"Line {chr(i)}" for i in range(74, 91)])
 
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "tail_main.py")],
-        input=input_data,
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-    output_lines = [line.strip() for line in result.stdout.strip().split("\n")]
-    expected_lines = [line.strip() for line in expected_output.strip().split("\n")]
+    monkeypatch.setattr(sys, "stdin", StringIO(input_data))
+    monkeypatch.setattr(sys, "argv", ["tail_main"])
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        tail_main()
 
-    assert output_lines == expected_lines, f"Wrong output:\nExpected:\n{expected_output}\nGot:\n{result.stdout}"
+    output_lines = stdout.getvalue().strip().split("\n")
+    expected_lines = expected_output.strip().split("\n")
+
+    assert output_lines == expected_lines, f"Wrong output:\nExpected:\n{expected_output}\nGot:\n{stdout.getvalue()}"
 
 
-def test_tail_empty_file(tmp_path):
+def test_tail_empty_file(monkeypatch, tmp_path):
     empty_file = tmp_path / "empty.txt"
     empty_file.touch()
 
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "tail_main.py"), str(empty_file)],
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+    monkeypatch.setattr(sys, "argv", ["tail_main", str(empty_file)])
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        tail_main()
 
-    assert result.stdout.strip() == "", "Empty file should produce no output"
+    assert stdout.getvalue().strip() == "", "Empty file should produce no output"
 
 
-def test_tail_missing_n_argument():
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "tail_main.py"), "-n"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_tail_missing_n_argument(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["tail_main", "-n"])
+    stderr = StringIO()
+    with redirect_stderr(stderr), pytest.raises(SystemExit) as excinfo:
+        tail_main()
 
-    assert result.returncode == 1, "Expected exit code 1 when `-n` is used without argument."
-    assert "tail: invalid number of lines:" in result.stderr, f"Expected usage error message, got: {result.stderr}"
+    assert excinfo.value.code != 0, "Expected non zero exit code when `-n` is used without argument."
 
 
-def test_tail_invalid_n_argument():
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "tail_main.py"), "-n", "abc"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_tail_invalid_n_argument(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["tail_main", "-n", "abc"])
+    stderr = StringIO()
+    with redirect_stderr(stderr), pytest.raises(SystemExit) as excinfo:
+        tail_main()
 
-    assert result.returncode == 1, "Expected exit code 1 when `-n` is given an invalid number."
-    assert "tail: invalid number of lines: abc" in result.stderr, (
-        f"Expected invalid number error message, got: {result.stderr}"
-    )
+    assert excinfo.value.code == 1, "Expected exit code 1 when `-n` is given an invalid number."

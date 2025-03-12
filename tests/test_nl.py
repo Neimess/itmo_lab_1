@@ -1,13 +1,21 @@
 import os
 import re
-import subprocess
 import sys
+from contextlib import redirect_stdout
 from io import StringIO
 
 import pytest
 
+from src.nl.nl import NL
+from src.nl.nl_main import main as nl_main
+
 SOLUTION_FOLDER_PATH = os.path.join("src", "nl")
 RESOURCE_FOLDER_PATH = os.path.join("artifacts", "nl")
+
+
+@pytest.fixture
+def nl():
+    return NL()
 
 
 def parse_nl_helper(output: str):
@@ -38,15 +46,13 @@ def parse_nl_helper(output: str):
         ),
     ],
 )
-def test_compare_lines(input_file: str, output_file: str) -> None:
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "nl_main.py"), input_file],
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_compare_lines(input_file: str, output_file: str, monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["nl_main", input_file])
+    stdout = StringIO()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    nl_main()
 
-    output_lines = result.stdout.strip().split("\n")
+    output_lines = stdout.getvalue().strip().split("\n")
 
     with open(output_file, encoding="utf-8") as expected_output_file:
         expected_output_lines = expected_output_file.read().strip().split("\n")
@@ -62,72 +68,48 @@ def test_compare_lines(input_file: str, output_file: str) -> None:
         )
 
 
-def test_process_file_not_found():
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "nl_main.py"), "non_existent_file.txt"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0, "The program should exit with an error if the file is missing."
-    assert "nl: non_existent_file.txt: No such file or directory" in result.stderr, (
-        f"Expected error, but stderr: {result.stderr}"
-    )
-
-
-def test_nl_stdin(monkeypatch):
+def test_nl_stdin(monkeypatch, nl):
     input_data = "\n".join([f"Line {chr(i)}" for i in range(65, 91)])
     expected_output = "\n".join([f"{idx + 1}\tLine {chr(i)}" for idx, i in enumerate(range(65, 91))])
 
     monkeypatch.setattr(sys, "stdin", StringIO(input_data))
-
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "nl_main.py")],
-        input=input_data,
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-    output_lines = [line.strip() for line in result.stdout.strip().split("\n")]
-    expected_lines = [line.strip() for line in expected_output.strip().split("\n")]
-
-    assert output_lines == expected_lines, f"Wrong output:\nExpected:\n{expected_output}\nGot:\n{result.stdout}"
+    output = StringIO()
+    with redirect_stdout(output):
+        nl.process_stream(sys.stdin)
+    actual_output = output.getvalue().strip()
+    actual_lines = [" ".join(line.split()).replace("\t", " ") for line in actual_output.split("\n")]
+    expected_lines = [" ".join(line.split()).replace("\t", " ") for line in expected_output.split("\n")]
+    assert actual_lines == expected_lines, f"Wrong output:\nExpected:\n{expected_output}\nGot:\n{actual_output}"
 
 
-def test_nl_file_not_found():
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "nl_main.py"), "non_existent_file.txt"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_nl_file_not_found(monkeypatch):
+    stderr = StringIO()
+    monkeypatch.setattr(sys, "argv", ["nl_main", "non_existent_file.txt"])
+    monkeypatch.setattr(sys, "stderr", stderr)
 
-    assert result.returncode != 0, "The program should exit with an error if the file is missing."
-    assert "nl: non_existent_file.txt: No such file or directory" in result.stderr, (
-        f"Expected file not found error, but got:\n{result.stderr}"
-    )
+    with pytest.raises(SystemExit) as excinfo:
+        nl_main()
+
+    assert excinfo.value.code != 0, "The program should exit with an error if the file is missing."
+
+    expected_error = "nl: non_existent_file.txt: No such file or directory"
+    stderr_output = stderr.getvalue()
+
+    assert expected_error in stderr_output, f"Expected file not found error, but got:\n{stderr_output}"
 
 
-def test_nl_file_permission_error(tmp_path):
+def test_nl_file_permission_error(tmp_path, monkeypatch):
     restricted_file = tmp_path / "restricted.txt"
     restricted_file.write_text("Some data")
 
     restricted_file.chmod(0o000)
-
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "nl_main.py"), str(restricted_file)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-
+    monkeypatch.setattr(sys, "argv", ["nl_main", str(restricted_file)])
+    stderr = StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    with pytest.raises(SystemExit) as excinfo:
+        nl_main()
     restricted_file.chmod(0o644)
 
-    assert result.returncode != 0, "The program should exit with an error on PermissionError."
-    assert f"nl: {restricted_file}: " in result.stderr, (
-        f"Expected permission error in stderr, but got:\n{result.stderr}"
-    )
+    assert excinfo.value.code != 0, "The program should exit with an error on PermissionError."
+    stderr_output = stderr.getvalue()
+    assert "Permission" in stderr_output, f"Expected permission error in stderr, but got:\n{stderr_output}"

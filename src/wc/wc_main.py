@@ -1,6 +1,6 @@
 import sys
 
-from wc import WC
+from src.wc.wc import WC
 
 
 def main() -> None:

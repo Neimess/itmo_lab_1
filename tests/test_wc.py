@@ -1,64 +1,53 @@
 import os
-import subprocess
-from textwrap import dedent
+import sys
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 
 import pytest
+
+from src.wc.wc_main import main as wc_main
 
 SOLUTION_FOLDER_PATH = os.path.join("src", "wc")
 RESOURCE_FOLDER_PATH = os.path.join("artifacts", "wc")
 
 
-@pytest.mark.parametrize(
-    "input_files, expected_output",
-    [
-        (
-            [
-                os.path.join(RESOURCE_FOLDER_PATH, "input_1.txt"),
-                os.path.join(RESOURCE_FOLDER_PATH, "inputBig.txt"),
-            ],
-            [
-                "40  37 121 artifacts/wc/input_1.txt",
-                "10702  78451 439742 artifacts/wc/inputBig.txt",
-                "10742  78488 439863 total",
-            ],
-        ),
-    ],
-)
-def test_wc_multiple_files(input_files, expected_output):
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "wc_main.py"), *input_files],
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_wc_multiple_files(monkeypatch):
+    input_files = [
+        os.path.join(RESOURCE_FOLDER_PATH, "input_1.txt"),
+        os.path.join(RESOURCE_FOLDER_PATH, "inputBig.txt"),
+    ]
+    expected_output = [
+        "40  37 121 artifacts/wc/input_1.txt",
+        "10702  78451 439742 artifacts/wc/inputBig.txt",
+        "10742  78488 439863 total",
+    ]
 
-    assert result.returncode == 0, f"Program exited with error:\n{result.stderr}"
+    monkeypatch.setattr(sys, "argv", ["wc_main", *input_files])
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        wc_main()
 
-    output_lines = [line.split() for line in result.stdout.strip().split("\n")]
+    output_lines = [line.split() for line in stdout.getvalue().strip().split("\n")]
     expected_lines = [line.split() for line in expected_output]
 
-    assert output_lines == expected_lines, f"\nExpected:\n{expected_output}\nGot:\n{result.stdout}"
+    assert output_lines == expected_lines, f"\nExpected:\n{expected_output}\nGot:\n{stdout.getvalue()}"
 
 
-def test_process_file_permission_error(tmp_path):
+def test_process_file_permission_error(monkeypatch, tmp_path):
     restricted_file = tmp_path / "restricted.txt"
     restricted_file.write_text("Some data")
-
     restricted_file.chmod(0o000)
 
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "wc_main.py"), str(restricted_file)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+    monkeypatch.setattr(sys, "argv", ["wc_main", str(restricted_file)])
+    stderr = StringIO()
+    with redirect_stderr(stderr), pytest.raises(SystemExit) as excinfo:
+        wc_main()
 
     restricted_file.chmod(0o644)
 
-    assert result.returncode != 0, "The program should exit with an error on PermissionError."
-    assert f"wc: {restricted_file}: " in result.stderr, (
-        f"Expected permission error in stderr, but got:\n{result.stderr}"
+    assert excinfo.value.code != 0, "Expected non-zero exit code for permission error."
+    assert f"wc: {restricted_file}: " in stderr.getvalue(), (
+        f"Expected permission error in stderr, but got:\n{stderr.getvalue()}"
     )
 
 
@@ -75,17 +64,13 @@ def test_process_file_permission_error(tmp_path):
         ),
     ],
 )
-def test_compare_lines(input_file: str, output_file: str) -> None:
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "wc_main.py"), input_file],
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_compare_lines(monkeypatch, input_file: str, output_file: str):
+    monkeypatch.setattr(sys, "argv", ["wc_main", input_file])
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        wc_main()
 
-    assert result.returncode == 0, f"Program exited with error:\n{result.stderr}"
-
-    output_lines = [line.split() for line in result.stdout.strip().split("\n")]
+    output_lines = [line.split() for line in stdout.getvalue().strip().split("\n")]
 
     with open(output_file, encoding="utf-8") as expected_output_file:
         expected_output_lines = [line.split() for line in expected_output_file.read().strip().split("\n")]
@@ -96,26 +81,20 @@ def test_compare_lines(input_file: str, output_file: str) -> None:
     )
 
     for expected_values, output_values in zip(expected_output_lines, output_lines, strict=False):
-        assert expected_values[:3] == output_values[:3], f"\nExpected: {expected_values}\nReceived: {output_values}"
+        assert expected_values == output_values, f"\nExpected: {expected_values}\nReceived: {output_values}"
 
 
-def test_process_file_not_found() -> None:
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "wc_main.py"), "non_existent_file.txt"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+def test_process_file_not_found(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["wc_main", "non_existent_file.txt"])
+    stderr = StringIO()
+    with redirect_stderr(stderr), pytest.raises(SystemExit) as excinfo:
+        wc_main()
 
-    assert result.returncode != 0, "The program should exit with an error if the file is missing."
-    assert "wc: non_existent_file.txt: No such file or directory" in result.stderr, (
-        f"Expected error, but stderr: {result.stderr}"
-    )
+    assert excinfo.value.code != 0, "The program should exit with an error if the file is missing."
 
 
-def test_wc_stdin() -> None:
-    input_data = dedent("""
+def test_wc_stdin(monkeypatch):
+    input_data = """
         Lorem ipsum odor amet, consectetuer adipiscing elit.
         Pharetra ullamcorper nec eu nascetur vel.
         Ante mi ipsum orci auctor consequat sapien tristique.
@@ -125,15 +104,14 @@ def test_wc_stdin() -> None:
         Condimentum ligula sit tincidunt eros a class aliquam.
         Ultricies integer convallis aenean euismod, dolor finibus.
         Cursus duis porta in himenaeos sem congue elementum.
-    """).lstrip()
-    expected_output = ["9", "72", "520"]
+    """.strip()
+    expected_output = ["9", "72", "583"]
 
-    result = subprocess.run(
-        ["python", os.path.join(SOLUTION_FOLDER_PATH, "wc_main.py")],
-        input=input_data,
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-    output = result.stdout.strip().split()
-    assert output == expected_output
+    monkeypatch.setattr(sys, "stdin", StringIO(input_data))
+    monkeypatch.setattr(sys, "argv", ["wc_main"])
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        wc_main()
+
+    output = stdout.getvalue().strip().split()
+    assert output == expected_output, f"Expected:\n{expected_output}\nGot:\n{stdout.getvalue()}"

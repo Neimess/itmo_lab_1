@@ -1,13 +1,13 @@
 import sys
 
-from tail import Tail
+from src.tail.tail import Tail
 
 
 def main() -> None:
     args = sys.argv[1:]
     if args and args[0] == "-n":
         if len(args) < 3:
-            print(f"tail: invalid number of lines: {args[1]}", file=sys.stderr)
+            print("tail: invalid number of lines", file=sys.stderr)
             sys.exit(1)
 
         try:

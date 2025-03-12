@@ -29,7 +29,7 @@ class NL:
     def _print_lines(self, lines: list[str]) -> None:
         max_number_length: int = len(str(self.line_number + len(lines) - 1))
         for line in lines:
-            print(f"\t{self.line_number:>{max_number_length}}\t{line.rstrip()}", flush=True)
+            print(f"{str(self.line_number).rjust(max_number_length)}\t{line.rstrip()}", flush=True)
             self.line_number += 1
 
     def _exit_with_error(self) -> NoReturn:

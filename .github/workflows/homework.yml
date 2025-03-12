@@ -21,6 +21,7 @@ jobs:
       - name: Run Linter
         run: uv run ruff check . --no-cache
 
+
   mypy:
     name: MyPy [Optional]
     runs-on: ubuntu-latest

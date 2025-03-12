@@ -9,4 +9,4 @@ check_types:
 	mypy src
 
 make pytests:
-	uv run pytest tests -vv -s --cov --cov-report=term-missing
+	uv run pytest tests -vv -s
